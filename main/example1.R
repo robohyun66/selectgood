@@ -1,0 +1,175 @@
+## Generate data
+library(genlassoinf)
+## set.seed(1)
+n = 12
+sigma = 4
+ngen = 300
+mn = rep(0,n)
+
+
+onesim <- function(ii=NULL){
+
+    ## Generate data
+    if(!is.null(ii))  set.seed(ii)
+    y0 <- mn + rnorm(n,0,sigma)
+
+    ## Run two-step fused lasso on it
+    maxsteps = 2
+    D = makeDmat(n,type='tf',ord=0)
+    f0 = dualpathSvd2(y0, D=D, maxsteps, approx=T)
+
+    ## Get naive 1-step poyhedron
+    Gobj.naive = getGammat.naive(obj = f0, y = y0, condition.step = 1)
+    f0$nk
+
+    G = Gobj.naive$G
+    u = Gobj.naive$u
+    cps = f0$action[1]   ## cps = c(4,9)
+    inds = do.call(c,lapply(cps, function(cp)return(cp+c(-1,0,1))))
+    other.inds = (1:n)[-inds]
+
+    ## Helper function
+    get_other_segment_indices <- function(other.inds){
+        brks = which(diff(other.inds)!=1)
+        other.inds[brks]
+        ilist = Map(function(a,b)(a+1):b, c(0,brks),c(brks,length(other.inds)))
+        return( lapply(ilist, function(i)other.inds[i]))
+    }
+    make.contrast <- function(l, b, r, n, direction=+1){
+        stopifnot(l <= b & b < r)
+        ind1 = l:b
+        ind2 = (b+1):r
+        v = rep(0,n)
+        v[ind1] = -1/length(ind1)
+        v[ind2] = 1/length(ind2)
+        return(rbind(v*direction))
+    }
+
+
+    ## Get A = the map to the sufficient statistics
+    plateaus = get_other_segment_indices(other.inds)
+    suff.rows = do.call(rbind,lapply(plateaus, function(plt){v=rep(0,n); v[plt] = 1/length(plt); return(v)}))
+    sat.rows = do.call(rbind, lapply(inds, function(ind){v=rep(0,n); v[ind] = 1;return(v)}))
+    A = rbind(suff.rows, sat.rows)
+
+    #### Build A_rest
+
+    ## Method 1: manual
+    rest.inds = unlist(sapply(plateaus, function(plt)plt[-1]))
+    A_rest= do.call(rbind, lapply(rest.inds, function(ind){v=rep(0,n); v[ind] = 1;return(v)}))
+
+    ## Method 2: svd
+    S = svd(t(A),nu=ncol(A))
+    nr = nrow(suff.rows) + nrow(sat.rows) + nrow(test.stat.row)
+    A_rest = t(S$u[,(nr+1):ncol(A)])
+
+    ## Method 3: smarter manual (null space row bases)
+    B = matrix(0, nrow = n-nrow(A), ncol = n)
+    Bblocks <- lapply(plateaus, function(plt){
+        b = matrix(0, nrow = length(plt)-1, ncol = n)
+        b[,plt] = makeDmat(m=length(plt), type="tf", ord=0)
+        return(b)
+    })
+    binds = c(0,cumsum(sapply(Bblocks, nrow)))
+    Bblocks.rownums = sapply(1:(length(binds)-1), function(ii){
+        (binds[ii]+1):binds[ii+1]
+    })
+    for(ii in 1:length(plateaus)){B[Bblocks.rownums[[ii]], ] = Bblocks[[ii]]}
+
+    ## Build A_aug.
+    Ag = rbind(A,A_rest)
+
+    ## Partition
+    Sigma = (Ag) %*% diag(rep(sigma^2,n)) %*% t(Ag)
+    Si = nrow(A)
+    S11 = Sigma[1:Si, 1:Si]
+    S12 = Sigma[1:Si, (Si+1):n]
+    S21 = Sigma[(Si+1):n, 1:Si]
+    S22 = Sigma[(Si+1):n, (Si+1):n]
+
+    ## Make mean + covariance for W_rest | W
+    w = A %*% y0
+    Sigmarest = S22-S21%*%solve(S11)%*%S12
+    murest = S21 %*% solve(S11) %*% cbind(w)
+
+    ## Draw ys
+    wrests  = MASS::mvrnorm(n=ngen, mu=murest, Sigma=Sigmarest)
+    ys = apply(wrests, 1, function(wrest){
+        ysample = solve(Ag) %*% cbind(c(w,wrest))
+        return(ysample)
+    })
+
+    ## Check polyhedron
+    which.y.in.polyhedron =  apply(G%*%ys, 2, function(mycol){
+        all(as.numeric(mycol) > u)
+    })
+
+    ys = ys[,which.y.in.polyhedron]
+
+    ## ## Take these samples, run the second step, collect the regularization parameter
+    ## maxsteps=2
+    ## D = makeDmat(n,type='tf',ord=0)
+    ## newlams = apply(ys, 2, function(mycol){
+    ##     ynew = as.numeric(mycol)
+    ##     fnew = dualpathSvd2(ynew, D=D, maxsteps, approx=T)
+    ##     newlambda = fnew$lambda[2]
+    ##     return(newlambda)
+    ## })
+
+    ## Take these samples, run the second step, calculate the linear contrast
+    maxsteps=2
+    D = makeDmat(n,type='tf',ord=0)
+    newstat = apply(ys, 2, function(mycol){
+        ## fnew = dualpathSvd2(mycol, D=D, 2, approx=T)
+        ## cp1 = fnew$action[1]
+        ## cp2 = fnew$action[2]
+        ## ## d = sign(cp2)
+        ## d=1
+        ## if(cp2 > cp1){
+        ##     test.stat.row = make.contrast(cp1,cp2,n,n,d)
+        ## } else {
+        ##     test.stat.row = make.contrast(1,cp2,cp1,n,d)
+        ## }
+        ## print(rbind(test.stat.row) %*% cbind(mn))
+        test.stat.row = > E
+        return(rbind(test.stat.row)%*%cbind(mycol))
+    })
+
+
+    ## Get the current test statistic value
+    cp1 = f0$action[1]
+    cp2 = f0$action[2]
+    ## d = sign(cp2)
+    d=1
+    if(cp2 > cp1){
+        test.stat.row = make.contrast(cp1,cp2,n,n,d)
+    } else {
+        test.stat.row = make.contrast(1,cp2,cp1,n,d)
+    }
+    mystat = as.numeric(rbind(test.stat.row)%*%cbind(y0))
+
+    ## ## Visualize, get p-value
+    ## hist(newstat)
+    ## abline(v=mystat)
+
+    ## Calculate p-value
+    pv = sum(newstat>mystat)/ncol(ys)
+    return(pv)
+}
+
+
+## Actually run simulations
+nsim = 100
+pvs = rep(NA,nsim)
+for(ii in 100+(1:nsim)){
+    tryCatch({
+        print(ii)
+        pvs[ii] <- onesim(ii)
+    }, error=function(e) {print("error occurred")})
+}
+
+
+## Plot
+hist(pvs)
+qqplot(x=pvs,y=seq(from=0,to=1,length=nsim))
+abline(0,1)
