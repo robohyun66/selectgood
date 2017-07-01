@@ -2,13 +2,14 @@
 library(genlassoinf)
 n = 12
 sigma = 1
-mn = rep(0,n)
+mn = rep(1,n)
+ngen=10000
+check.poly=TRUE
+nsim = 50
 
-
-onesim <- function(ii=NULL, ngen=300, opt=3){
-
-    ## Generate data
-    if(!is.null(ii))  set.seed(ii)
+results = mclapply(1:nsim, function(isim){
+    print(isim)
+    set.seed(isim)
     y0 <- mn + rnorm(n, 0, sigma)
 
     ## Run two-step fused lasso on it
@@ -31,19 +32,24 @@ onesim <- function(ii=NULL, ngen=300, opt=3){
     plateaus = get_other_segment_indices(other.inds)
     suff.rows = do.call(rbind,lapply(plateaus, function(plt){v=rep(0,n); v[plt] = 1/length(plt); return(v)}))
     sat.rows = do.call(rbind, lapply(inds, function(ind){v=rep(0,n); v[ind] = 1;return(v)}))
-    A = rbind(suff.rows, sat.rows)
+    ## A = rbind(suff.rows, sat.rows)
+    A = suff.rows
+
+    myrow = rep(1,n)
+    test.stat.row = rbind(myrow) ## Temporarily added, nonrandom statistic
+
 
     #### Build A_rest
+opts = lapply(2, function(opt){
     if(opt==1){
         ## Method 1: manual
         rest.inds = unlist(sapply(plateaus, function(plt)plt[-1]))
         A_rest= do.call(rbind, lapply(rest.inds, function(ind){v=rep(0,n); v[ind] = 1;return(v)}))
 
     } else if (opt==2){
-
         ## Method 2: svd (most generic!!!)
         S = svd(t(A),nu=ncol(A))
-        nr = nrow(suff.rows) + nrow(sat.rows) ##+ nrow(test.stat.row)
+        nr = nrow(suff.rows)## + nrow(sat.rows) ##+ nrow(test.stat.row)
         A_rest = t(S$u[,(nr+1):ncol(A)])
 
     } else if(opt==3){
@@ -76,92 +82,77 @@ onesim <- function(ii=NULL, ngen=300, opt=3){
     ## Partition matrix into four blocks
     Sigma = (Ag) %*% diag(rep(sigma^2,n)) %*% t(Ag)
     Si = nrow(A)
-    S11 = Sigma[1:Si, 1:Si]
-    S12 = Sigma[1:Si, (Si+1):n]
-    S21 = Sigma[(Si+1):n, 1:Si]
-    S22 = Sigma[(Si+1):n, (Si+1):n]
+    S11 = Sigma[1:Si, 1:Si, drop=FALSE]
+    S12 = Sigma[1:Si, (Si+1):n, drop=FALSE]
+    S21 = Sigma[(Si+1):n, 1:Si, drop=FALSE]
+    S22 = Sigma[(Si+1):n, (Si+1):n, drop=FALSE]
 
     ## Calculate using Schur's complement
     Sigmarest = S22 - S21%*%solve(S11, S12)
     murest = S21 %*% solve(S11, cbind(w))
 
-    ## Draw ys
+    ## Using the original way
     wrests = MASS::mvrnorm(n=ngen, mu=murest, Sigma=Sigmarest)
     ys = apply(wrests, 1, function(wrest){
         ysample = solve(Ag) %*% cbind(c(w,wrest))
         return(ysample)
     })
-
-    ## Check polyhedron
-    check.poly=TRUE
     if(check.poly){
         which.y.in.polyhedron =  apply(G%*%ys, 2, function(mycol){
             all(as.numeric(mycol) > u)
         })
         ys = ys[,which.y.in.polyhedron]
     }
-
-    myrow = rep(1,n)
-    test.stat.row = rbind(myrow) ## Temporarily added, nonrandom statistic
     mystat = as.numeric(rbind(test.stat.row)%*%cbind(y0))
 
     ## Take ys, run the second step, calculate the linear contrast
-    D = makeDmat(n,type='tf',ord=0)
+    ## Calculate p-value
     newstat = apply(ys, 2, function(mycol){
         return(rbind(test.stat.row)%*%cbind(mycol))
     })
-
-    ## Calculate p-value
     pv = sum(newstat>mystat)/length(newstat)
-    return(pv)
-}
 
 
-## Actually run simulations
-sim = 300
-pvs = rep(NA,nsim)
-## for(ii in 100+(1:nsim)){
-pvs = mclapply((1:nsim), function(isim){
-    tryCatch({
-        ## cat('\r', isim, 'out of', nsim)
-        return(onesim(opt=3))
-    }, error=function(e) {print("error occurred")})
+    ## Transform to the conditional distribution
+    Aginv = solve(Ag)
+    Sigmanew = matrix(0, nrow=n, ncol=n)
+    Sigmanew[(Si+1):n, (Si+1):n] = Sigmarest
+    Sigmaorig = Aginv %*% Sigmanew %*% t(Aginv)
+    muorig = solve(Ag, c(w, murest))
+
+    ## Further transform to get distribution of test statistic
+    sigmatest = rbind(test.stat.row) %*% Sigmaorig %*% t(test.stat.row)
+    mutest = rbind(test.stat.row)%*%cbind(muorig)
+
+    ys = t(MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
+    if(check.poly){
+        which.y.in.polyhedron =  apply(G%*%ys, 2, function(mycol){
+            all(as.numeric(mycol) > u)
+        })
+        ys = ys[,which.y.in.polyhedron, drop=FALSE]
+    }
+    mystat = as.numeric(rbind(test.stat.row)%*%cbind(y0))
+
+    ## Take ys, run the second step, calculate the linear contrast
+    ## Calculate p-value
+    D = makeDmat(n,type='tf',ord=0)
+    newstat2 = apply(ys, 2, function(mycol){
+        return(rbind(test.stat.row)%*%cbind(mycol))
+    })
+    pv2 = sum(newstat2>mystat)/length(newstat2)
+
+    ## is there /any/ meaningful variance?
+    meaningful = (var(newstat2)>1E-10 | var(newstat)>1E-10)
+
+    return(list(Sigmaorig=Sigmaorig, muorig=muorig, pv=pv, pv2=pv2, newstat,
+                newstat2, meaningful=meaningful,sigmatest=sigmatest,mutest=mutest))
+})
+
+    ## lapply(opts, function(myopt)(myopt[c(3,4,7)]))
+    ## return(any(sapply(opts, function(myopt)(myopt[c(7)]))))
+    ## return(sapply(opts, function(myopt)(myopt[["sigmatest"]])))
+    return(opts[[1]][c("sigmatest", "mutest")])
 }, mc.cores=3)
-pvs2 = unlist(pvs)
-qqplot(y=pvs2,x=seq(from=0,to=1,length=length(pvs2)),xlab = "expected", ylab="observed")
-abline(0,1)
 
-
-## Do all three methods agree in terms of p-values? No, opt3 differs.
-ngen = 1000
-isim=10
-pv1 = (onesim(isim, ngen=2000, opt=1))
-pv2 = (onesim(NULL, ngen=2000, opt=2))
-pv3 = (onesim(NULL, ngen=2000, opt=3))
-
-pv2
-## See which polyhedron (algorithm result) results in p-values that are
-## non-uniform.
-
-
-
-
-    ## Take these samples, run the second step, collect the regularization parameter
-    ## maxsteps = 2
-    ## D = makeDmat(n,type='tf',ord=0)
-    ## newlams = apply(ys, 2, function(mycol){
-    ##     ynew = as.numeric(mycol)
-    ##     fnew = dualpathSvd2(ynew, D=D, maxsteps, approx=T)
-    ##     newlambda = fnew$lambda[2]
-    ##     return(newlambda)
-    ## })
-
-    ## Get the current test statistic value
-    ## ## d = 1
-    ## if(cp2 > cp1){
-    ##     test.stat.row = make.contrast(cp1,cp2,n,n,d)
-    ## } else {
-    ##     test.stat.row = make.contrast(1,cp2,cp1,n,d)
-    ## }
-
-    ## myrow = rep(0,n); myrow[5]=1
+### Investigate things
+results

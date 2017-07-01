@@ -5,11 +5,26 @@ sigma = 1
 mn = rep(0,n)
 
 
+## Fix polyhedron beforehand
+G = rbind(c(1,-1,rep(0,n-2)))
+u = 2# mn = c(2,rep(0,n-1))
+
+## Fix the test statistic row.
+test.stat.row = c(1,-1,rep(0,n-2))
+
+
 onesim <- function(ii=NULL, ngen=300, opt=3){
 
     ## Generate data
     if(!is.null(ii))  set.seed(ii)
     y0 <- mn + rnorm(n, 0, sigma)
+
+    check.poly=TRUE
+    if(check.poly){
+        while(G%*%y0 < u){
+            y0 <- mn + rnorm(n,0,sigma)
+        }
+     }
 
     ## Run two-step fused lasso on it
     maxsteps = 2
@@ -18,14 +33,19 @@ onesim <- function(ii=NULL, ngen=300, opt=3){
     cp1 = f0$action[1]
     cp2 = f0$action[2]
 
-    ## Get naive 1-step poyhedron
-    Gobj.naive = getGammat.naive(obj = f0, y = y0, condition.step = 1)
-    G = Gobj.naive$G
-    u = Gobj.naive$u
-    cps = cp1 ##f0$action[1]   ## cps = c(4,9)
+    ## ## Get naive 1-step poyhedron
+    ## Gobj.naive = getGammat.naive(obj = f0, y = y0, condition.step = 1)
+    ## G = Gobj.naive$G
+    ## u = Gobj.naive$u
+    ## cps = cp1##f0$action[1]   ## cps = c(4,9)
+    ## inds = do.call(c,lapply(cps, function(cp)return(cp+c(-1,0,1))))
+    ## inds = inds[inds!=0]
+    ## other.inds = (1:n)[-inds]
+
+    cps = 4
     inds = do.call(c,lapply(cps, function(cp)return(cp+c(-1,0,1))))
-    inds = inds[inds!=0]
     other.inds = (1:n)[-inds]
+
 
     ## Get A = the map to the sufficient statistics
     plateaus = get_other_segment_indices(other.inds)
@@ -35,6 +55,7 @@ onesim <- function(ii=NULL, ngen=300, opt=3){
 
     #### Build A_rest
     if(opt==1){
+
         ## Method 1: manual
         rest.inds = unlist(sapply(plateaus, function(plt)plt[-1]))
         A_rest= do.call(rbind, lapply(rest.inds, function(ind){v=rep(0,n); v[ind] = 1;return(v)}))
@@ -101,13 +122,41 @@ onesim <- function(ii=NULL, ngen=300, opt=3){
         ys = ys[,which.y.in.polyhedron]
     }
 
-    myrow = rep(1,n)
+    ## Take these samples, run the second step, collect the regularization parameter
+    ## maxsteps = 2
+    ## D = makeDmat(n,type='tf',ord=0)
+    ## newlams = apply(ys, 2, function(mycol){
+    ##     ynew = as.numeric(mycol)
+    ##     fnew = dualpathSvd2(ynew, D=D, maxsteps, approx=T)
+    ##     newlambda = fnew$lambda[2]
+    ##     return(newlambda)
+    ## })
+
+    ## Get the current test statistic value
+    ## ## d = 1
+    ## if(cp2 > cp1){
+    ##     test.stat.row = make.contrast(cp1,cp2,n,n,d)
+    ## } else {
+    ##     test.stat.row = make.contrast(1,cp2,cp1,n,d)
+    ## }
+
+    myrow = rep(0,n); myrow[5]=1
     test.stat.row = rbind(myrow) ## Temporarily added, nonrandom statistic
     mystat = as.numeric(rbind(test.stat.row)%*%cbind(y0))
 
     ## Take ys, run the second step, calculate the linear contrast
     D = makeDmat(n,type='tf',ord=0)
     newstat = apply(ys, 2, function(mycol){
+        ## fnew = dualpathSvd2(mycol, D=D, 2, approx=T)
+        ## cp1 = fnew$action[1]
+        ## cp2 = fnew$action[2]
+        ## d = sign(cp2)
+        ## ## d = 1
+        ## if(cp2 > cp1){
+        ##     test.stat.row = make.contrast(cp1,cp2,n,n,d)
+        ## } else {
+        ##     test.stat.row = make.contrast(1,cp2,cp1,n,d)
+        ## }
         return(rbind(test.stat.row)%*%cbind(mycol))
     })
 
@@ -118,7 +167,7 @@ onesim <- function(ii=NULL, ngen=300, opt=3){
 
 
 ## Actually run simulations
-sim = 300
+nsim = 300
 pvs = rep(NA,nsim)
 ## for(ii in 100+(1:nsim)){
 pvs = mclapply((1:nsim), function(isim){
@@ -142,26 +191,3 @@ pv3 = (onesim(NULL, ngen=2000, opt=3))
 pv2
 ## See which polyhedron (algorithm result) results in p-values that are
 ## non-uniform.
-
-
-
-
-    ## Take these samples, run the second step, collect the regularization parameter
-    ## maxsteps = 2
-    ## D = makeDmat(n,type='tf',ord=0)
-    ## newlams = apply(ys, 2, function(mycol){
-    ##     ynew = as.numeric(mycol)
-    ##     fnew = dualpathSvd2(ynew, D=D, maxsteps, approx=T)
-    ##     newlambda = fnew$lambda[2]
-    ##     return(newlambda)
-    ## })
-
-    ## Get the current test statistic value
-    ## ## d = 1
-    ## if(cp2 > cp1){
-    ##     test.stat.row = make.contrast(cp1,cp2,n,n,d)
-    ## } else {
-    ##     test.stat.row = make.contrast(1,cp2,cp1,n,d)
-    ## }
-
-    ## myrow = rep(0,n); myrow[5]=1

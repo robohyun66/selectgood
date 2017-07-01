@@ -48,8 +48,6 @@ onesim <- function(ii){
     suff.rows = do.call(rbind,lapply(plateaus, function(plt){v=rep(0,n); v[plt] = 1/length(plt); return(v)}))
     sat.rows = do.call(rbind, lapply(inds, function(ind){v=rep(0,n); v[ind] = 1;return(v)}))
 
-
-
     cp1 = f0$action[1]
     cp2 = f0$action[2]
     if(cp2 < cp1){
@@ -79,15 +77,9 @@ onesim <- function(ii){
     Arest = t(S$u[,(nr+1):ncol(A)])
     Ag = rbind(A,Arest)
 
-
-
-
-
-
     ## Calculate p-value via the closed form conditional null distribution.
-    Areturn(pv)
+    return(pv)
 }
-
 
 
 nsim = 500
