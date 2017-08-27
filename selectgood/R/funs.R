@@ -1,3 +1,10 @@
+## Helper function.
+get_plateaus <- function(inds,n){
+    ilist = Map(function(a,b)(a+1):b,
+                c(0,inds), c(inds,n))
+    return(ilist)
+}
+
 ## Helper function
 get_other_segment_indices <- function(other.inds){
     brks = which(diff(other.inds)!=1)
@@ -16,6 +23,64 @@ make.contrast <- function(l, b, r, n, direction=+1){
     v[ind2] = 1/length(ind2)
     return(rbind(v*direction))
 }
+
+
+## Helper function
+make.hybrid.contrast <- function(cp, cp.sign,n){
+    if(cp>=2 & cp<=n-2){
+        v <- rep(0,n); v[cp+c(1:2)] <- cp.sign*(c(1/2,1/2)); v[cp+c(-1,0)] <- -cp.sign*(c(1/2,1/2));
+    } else {
+        v <- rep(0,n); v[cp+1] <- cp.sign; v[cp] <- -cp.sign;  ## spike contrast
+    }
+    return(v)
+}
+
+## Helper function
+make.hybrid.contrast2 <- function(cp, cp.sign,n){
+    if(cp>=3 & cp<=n-3){
+        v <- rep(0,n); v[cp+c(1:3)] <- cp.sign*(rep(1/3,3)); v[cp+c((-2):0)] <- -cp.sign*(rep(1/3,3));
+    } else {
+        v <- rep(0,n); v[cp+1] <- cp.sign; v[cp] <- -cp.sign;  ## spike contrast
+    }
+    return(v)
+}
+
+## Helper function
+make.hybrid.contrast3 <- function(cp, cp.sign,n){
+    if(cp>=4 & cp<=n-4){
+        v <- rep(0,n); v[cp+c(1:4)] <- cp.sign*(rep(1/4,4)); v[cp+c((-3):0)] <- -cp.sign*(rep(1/4,4));
+    } else {
+        v <- rep(0,n); v[cp+1] <- cp.sign; v[cp] <- -cp.sign;  ## spike contrast
+    }
+    return(v)
+}
+
+
+
+make.hybrid.contrast.with.buffer <- function(cp, cp.sign,n, buff){
+    if(buff==1){
+        v <- rep(0,n); v[cp+1] <- cp.sign; v[cp] <- -cp.sign;  ## spike contrast
+        return(v)
+    }
+    ## cp=8
+    ## buff=2
+    if(cp>=buff & cp<=n-(buff)){
+        v <- rep(0,n);
+        if(cp>=n-buff){
+            v[cp+c((-buff+1):0)] <- cp.sign*(rep(1/buff,buff));
+            v[(cp+1):n] <- -cp.sign*(rep(1/(n-cp),n-cp));
+        } else {
+            v[1:cp] <- cp.sign*(rep(1/(cp),cp));
+            v[cp+c(1:buff)] <- -cp.sign*(rep(1/(buff),buff));
+        }
+    } else {
+        v <- rep(0,n);
+        v[cp+c((-buff+1):0)] <- cp.sign*(rep(1/buff,buff));
+        v[cp+c(1:buff)] <- -cp.sign*(rep(1/(buff),buff));
+    }
+    return(v)
+}
+
 
 
 ## Say vector y comes from N(mu,sm). This function obtains the distribution
@@ -86,3 +151,4 @@ qqunif <- function(pp, main=NULL,add=FALSE,returnxy=FALSE,...){
     if(!is.null(main)) graphics::title(main=main)
     if(returnxy) return(xy)
 }
+

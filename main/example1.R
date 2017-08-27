@@ -1,17 +1,14 @@
 ## Synopsis: Generate data from a particular mean, test the first changepoint
-## model's goodness of fit. When
+## model's goodness of fit. Main things to tweak is the test contrast and
+## statistic.
 
 ## Generate data
-library(genlassoinf)
 n = 12
 sigma = 1
-## mn = rep(0,n)
-delta = 0
-mn = c(rep(0,n/2),rep(delta,n/2))
-## mn = c(rep(0,n/3),rep(delta,n/3),rep(0,n/3))
+delta = 0 ## signal size
+mn = c(rep(0,n/2), rep(delta,n/2))
 
 onesim <- function(ii=NULL, ngen=300){
-
     ## Generate data
     if(!is.null(ii))  set.seed(ii)
     y0 <- mn + rnorm(n, 0, sigma)
@@ -19,12 +16,13 @@ onesim <- function(ii=NULL, ngen=300){
     ## Run two-step fused lasso on it
     maxsteps = 2
     D = makeDmat(n, type='tf',ord=0)
-    f0 = dualpathSvd2(y0, D=D, maxsteps, approx=T)
+    f0 = genlassoinf::dualpathSvd2(y0, D=D, maxsteps, approx=T)
     cp1 = f0$action[1]
     cp2 = f0$action[2]
 
     ## Get naive 1-step poyhedron
-    Gobj.naive = getGammat.naive(obj = f0, y = y0, condition.step = 1)
+    Gobj.naive = genlassoinf::getGammat.naive(obj = f0, y = y0,
+                                              condition.step = 1)
     G = Gobj.naive$G
     u = Gobj.naive$u
     cps = cp1
@@ -68,14 +66,16 @@ onesim <- function(ii=NULL, ngen=300){
     Sigmaorig = Aginv %*% Sigmanew %*% t(Aginv)
     muorig = solve(Ag, c(w, murest))
 
-    ## Generate new y's and accept-reject
+    ## Generate new y's
+
+    ## Option 1. accept-reject
     ys = t(MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
     ## which.y.in.polyhedron =  apply(G%*%ys, 2, function(mycol){
     ##     all(as.numeric(mycol) > u)
     ## })
     ## ys = ys[,which.y.in.polyhedron, drop=FALSE]
 
-    ## Do new accept-reject that checks for changepoint identity only
+    ## Do new accept-reject that directly checks for changepoint identity only
     which.y.has.same.changepoint = unlist(apply(ys, 2, function(my.y){
         a = genlasso::fusedlasso1d(my.y,maxsteps=2)
         gaps = D%*%a$beta[,2]
@@ -90,7 +90,7 @@ onesim <- function(ii=NULL, ngen=300){
 
 
     ## Make next segment test statistic
-    d = (f0$pathobj$s)[2]#sign(cp2)
+    d = +1## (f0$pathobj$s)[2]#sign(cp2)
     if(cp2 > cp1){
         test.stat.row = make.contrast(cp1,cp2,n,n,d)
     } else {
@@ -107,23 +107,24 @@ onesim <- function(ii=NULL, ngen=300){
     newstat = apply(ys, 2, function(mycol){
         return(rbind(test.stat.row)%*%cbind(mycol))
     })
-    pv = sum(newstat>mystat)/length(newstat)
+    pv = sum(newstat>abs(mystat) | newstat < -abs(mystat) )/length(newstat)
 
     ## Naive pv
     munaive = rbind(test.stat.row)%*%cbind(mn)
     sigmanaivesquare = (rbind(test.stat.row)%*%t(test.stat.row)) * (sigma^2)
-    pvnaive = 1-pnorm(mystat, mean=munaive, sd=sqrt(sigmanaivesquare))
+    pvnaive = min(1-pnorm(mystat, mean=munaive, sd=sqrt(sigmanaivesquare)),
+                  pnorm(mystat, mean=munaive, sd=sqrt(sigmanaivesquare)))
 
     return(list(pv=pv,pvnaive=pvnaive, cps = c(cp1,cp2)))
 }
 
 
 ## Actually run simulations
-nsim = 200
+nsim = 100
 pvs = mclapply((1:nsim), function(isim){
         cat('\r', isim, 'out of', nsim)
     tryCatch({
-        return(onesim(ngen=1000))
+        return(onesim(ngen=100))
     }, error=function(e) {print("error occurred")})
 }, mc.cores=3)
 
