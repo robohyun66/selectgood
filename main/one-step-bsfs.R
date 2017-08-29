@@ -5,13 +5,13 @@ library(binSegInf)
 n=10; sigma=1; mn = rep(0,n)
 covariance <- diag(rep(sigma,n))
 
-nsim = 1000
+nsim = 100
 pvs = rep(NA,nsim)
 ## for(isim in 1:nsim){
 pvs = mclapply(1:nsim, function(isim){
     printprogress(isim,nsim)
+
     ## Generate data
-    set.seed(isim)
     y <- mn + rnorm(n,0,sigma)
 
     ## Fit a 1-step BSFS.
@@ -24,16 +24,12 @@ pvs = mclapply(1:nsim, function(isim){
     cp2.sign = g2$cp.sign[which(!(g2$cp==g1$cp))]
 
     ## Form contrast
-    ## v <- make_all_segment_contrasts(g1)[[1]] ## segment contrast
-    v <- make_contrast(cp2, c(cp1,cp2), cp2.sign, n)
-
-    ## Form a fixed contrast
-    ## v = c(-2,+1,2.5,-1.3)
+    v <- make_all_segment_contrasts(g2)[[toString(cp2*cp2.sign)]]
 
     ## Form the sufficient statistic linear operator
     plateaus = get_plateaus(cp1, n)
-    ## plateaus = get_plateaus(c(),n) ## Oddly, this gives uniform p-values
-    suff.rows = do.call(rbind,lapply(plateaus, function(plt){v=rep(0,n); v[plt] = 1/length(plt); return(v)}))
+    suff.rows = do.call(rbind,lapply(plateaus, function(plt){
+                                  v= rep(0,n); v[plt] = 1/length(plt); return(v)}))
     A = suff.rows
 
     ## Get null span
@@ -63,7 +59,7 @@ pvs = mclapply(1:nsim, function(isim){
     Sigmaorig = Aginv %*% Sigmanew %*% t(Aginv)
     muorig = Aginv %*%  cbind(c(w, murest))
 
-    ngen = 10000
+    ngen = 1000
     ys = (MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
 
     ## Rejection sample
@@ -71,13 +67,23 @@ pvs = mclapply(1:nsim, function(isim){
         return(all(mypoly$gamma %*% myrow > mypoly$u))
     })
 
-
     ## Compute the quantile of the vTY|AY
-    vtvec = (ys[which(in.polyhedron),]%*%v)
+    ys = ys[which(in.polyhedron),]
+    vtvec = apply(ys, 1, function(my.y){
+        g1 = binSeg_fixedSteps(my.y, numSteps=1)
+        g2 = binSeg_fixedSteps(my.y, numSteps=2)
+        my.cp1 = g1$cp[1]
+        my.cp1.sign = g1$cp.sign[1]
+        stopifnot(all.equal(my.cp1*my.cp1.sign, cp1*cp1.sign))
+        my.cp2 = g2$cp[which(!(g2$cp==g1$cp))]
+        my.cp2.sign = g2$cp.sign[which(!(g2$cp==g1$cp))]
+        my.v <- make_all_segment_contrasts(g2)[[toString(my.cp2*my.cp2.sign)]] ## segment contrast
+        return(sum(my.y*my.v))
+    })
+
     observed.vt = as.numeric(v%*%y)
     ## pv = sum(vtvec > observed.vt | vtvec < -observed.vt)/length(vtvec)
     pv = sum(vtvec > observed.vt)/length(vtvec)
-    ## pvs[isim] <- pv
     return(pv)
 
 }, mc.cores=3)
