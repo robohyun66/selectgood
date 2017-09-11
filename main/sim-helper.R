@@ -45,3 +45,89 @@ getstuff <- function(y, type, teststep){
                 cp2.sign=cp2.sign,
                 mypoly=mypoly))
 }
+
+
+## Helper function
+get.ith.model <- function(y, type, teststep){
+
+    n = length(y)
+
+    ## Fit binseg model, collect pvals BSFS.
+    if(type=="binseg"){
+
+        if(teststep==0){
+            obj.curr=NULL
+            poly.curr = polyhedra(obj=rbind(rep(0,n)),
+                                  u=0)
+        cp.curr = cp.curr.sign = c()
+        } else {
+            obj.curr = binSeg_fixedSteps(y, numSteps=teststep)
+            poly.curr = polyhedra(obj.curr)
+            cp.curr = obj.curr$cp
+            cp.curr.sign = obj.curr$cp.sign
+        }
+        obj.next = binSeg_fixedSteps(y, numSteps=teststep+1)
+    } else {
+        stop("type not written yet!")
+    }
+
+    cp.next = obj.next$cp[which(!(obj.next$cp%in%cp.curr))]
+    cp.next.sign = obj.next$cp.sign[which(!(obj.next$cp%in%cp.curr))]
+
+    return(list(obj.curr=obj.curr,
+                obj.next=obj.next,
+                cp.curr=cp.curr,
+                cp.next=cp.next,
+                cp.curr.sign=cp.curr.sign,
+                cp.next.sign=cp.next.sign,
+                poly.curr=poly.curr))
+}
+
+
+        get.cond.gauss.param = function(orig){
+
+            ## Form the sufficient statistic linear operator
+            plateaus = get_plateaus(orig$cp.curr, n)
+            suff.rows = do.call(rbind,lapply(plateaus, function(plt){
+                                      v= rep(0,n); v[plt] = 1/length(plt); return(v)}))
+            A = suff.rows
+
+            ## Get null span
+            w = A %*% y0
+            S = svd(t(A),nu=ncol(A))
+            nr = nrow(A)
+            A_rest = t(S$u[,(nr+1):ncol(A)])
+
+            Ag = rbind(A,A_rest)
+
+            ## Partition matrix into four blocks
+            Sigma = (Ag) %*% covariance %*% t(Ag)
+            Si = nrow(A)
+            S11 = Sigma[1:Si, 1:Si, drop=FALSE]
+            S12 = Sigma[1:Si, (Si+1):n, drop=FALSE]
+            S21 = Sigma[(Si+1):n, 1:Si, drop=FALSE]
+            S22 = Sigma[(Si+1):n, (Si+1):n, drop=FALSE]
+
+            ## Calculate distr of (A_rest y| Ay) using Schur's complement
+            Sigmarest = S22 - S21%*%solve(S11, S12)
+            murest = A_rest%*%mn + S21 %*% solve(S11, cbind(w - A %*% mn))
+
+            ## Linear this back to to the original y scale, via left multiplication by Ag
+            Aginv = solve(Ag)
+            Sigmanew = matrix(0, nrow=n, ncol=n)
+            Sigmanew[(Si+1):n, (Si+1):n] = Sigmarest
+            Sigmaorig = Aginv %*% Sigmanew %*% t(Aginv)
+            muorig = Aginv %*%  cbind(c(w, murest))
+            return(list(muorig=muorig, Sigmaorig=Sigmaorig))
+        }
+
+
+forwardstop_backwards <- function(pvseq, alpha){
+
+
+    alpha = 0.1
+    fdp = sapply(1:length(pvseq), function(k){
+        ((-1/k) * sum(log(1-pvseq)[1:k]))
+    })
+    which.max(fdp<=alpha)
+}

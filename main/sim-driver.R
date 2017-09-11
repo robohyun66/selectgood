@@ -99,3 +99,101 @@ dosim <- function(sim.settings){
     return(unlist(pvs))
 }
 
+
+
+## Synopsis: Try k-step binary segementation selected model tests.
+
+sim.settings = list(mn=rep(0,10), sigma=1, nsim=500, type="binseg", teststep = 1)
+
+##' Gets first and second p-valuex.
+dosim2 <- function(sim.settings){
+
+    ## Extracting things
+    sigma = sim.settings$sigma
+    mn = sim.settings$mn
+    n=length(mn)
+    nsim = sim.settings$nsim
+    type = sim.settings$type
+    teststep = sim.settings$teststep
+    covariance <- diag(rep(sigma,n))
+    lev=sim.settings$lev
+
+    ## Collect results
+    nsim=10
+    all.results = list(nsim)
+    ## for(isim in 1:nsim){
+    all.results = lapply(1:nsim, function(isim){
+        printprogress(isim,nsim)
+
+        ## Generate data
+        y0 <- mn + rnorm(n,0,sigma)
+
+        maxsteps = 1
+        pvseq = rep(NA,maxsteps)
+        changepoint.set.seq = list()
+        for(istep in 1:maxsteps){
+
+            ## Collect i'th model
+            source("../main/sim-helper.R")
+            modelinfo <- get.ith.model(y0, type=type, istep)
+            myparam <- get.cond.gauss.param(modelinfo)
+            muorig <- myparam$muorig
+            Sigmaorig <- myparam$Sigmaorig
+
+            ## ngen = 1000*istep^3 ## ngen should grow for further steps.
+            ngen = 100*istep^3 ## ngen should grow for further steps.
+            ys = (MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
+
+            ## Rejection sample
+            in.polyhedron <- apply(ys, 1, function(myrow){
+                return(all(modelinfo$poly.curr$gamma %*% myrow > modelinfo$poly.curr$u))
+            })
+            ys= ys[which(in.polyhedron),]
+
+
+            ## Compute the quantile of the vTY|AY
+            vtvec = apply(ys, 1, function(my.y){
+                new.modelinfo = get.ith.model(my.y, type, teststep)
+                all.vs = make_all_segment_contrasts(new.modelinfo$obj.next)
+                my.v <- all.vs[[toString(new.modelinfo$cp.next*new.modelinfo$cp.next.sign)]]
+                return(sum(my.y*my.v))
+            })
+
+            ## Compute original v^TY
+            all.vs = make_all_segment_contrasts(modelinfo$obj.next)
+            v <- all.vs[[toString(modelinfo$cp.next*modelinfo$cp.next.sign)]]
+            observed.vt = as.numeric(v%*%y0)
+
+            ## pv = sum(vtvec > observed.vt | vtvec < -observed.vt)/length(vtvec)
+            pvseq[istep] = sum(vtvec > observed.vt)/length(vtvec)
+            changepoint.set.seq[[istep]] = modelinfo$cp.curr
+        }
+
+        ## Compare observed verdicts to truth
+        true.cp = n/2
+        true.verdicts= sapply(changepoint.set.seq, function(mycpset){all(true.cp %in% mycpset)})
+        true.stop.time = which.min(true.verdicts)
+
+        ## See verdicts
+        verdicts = (pvseq<0.05)
+        pvseq = pvseq[which(!is.na(pvseq))]
+        ## selectiveInference::forwardStop(pvseq, alpha=0.1)
+
+        ## Applyforwardstop
+        alpha = 0.1
+        fdp = sapply(1:length(pvseq), function(k){
+            ((-1/k) * sum(log(1-pvseq)[1:k]))
+        })
+        which.max(fdp<=alpha)
+        false.discovery.proportion = (stop.time-1)/stop.time
+
+        return(list(stop.time=stop.time,
+                    changepoint.set.seq=changepoint.set.seq,
+                    pvseq=pvseq))
+    })
+
+    qqunif(sapply(all.results,function(myresult)myresult[["pvseq"]]))
+
+    ## Analyze results
+
+}
