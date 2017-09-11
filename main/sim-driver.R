@@ -4,8 +4,8 @@ library(genlassoinf)
 source("../main/sim-helper.R")
 
 sim.settings = list(mn=rep(0,10), sigma=1, nsim=500, type="binseg", teststep = 1)
-sim.settings = list(mn=rep(0,n), sigma=1, nsim=500, type="binseg", teststep = 0)
-sim.settings = list(mn=rep(0,4), sigma=1, nsim=500, type="fusedlasso", teststep = 0)
+## sim.settings = list(mn=rep(0,n), sigma=1, nsim=500, type="binseg", teststep = 0)
+## sim.settings = list(mn=rep(0,4), sigma=1, nsim=500, type="fusedlasso", teststep = 0)
 
 dosim <- function(sim.settings){
 
@@ -19,7 +19,7 @@ dosim <- function(sim.settings){
     covariance <- diag(rep(sigma,n))
 
     pvs =  mclapply(1:nsim, function(isim){
-    ## pvs =  lapply(1:nsim, function(isim){
+    ## for(isim in 1:nsim){
         printprogress(isim,nsim)
 
         ## Generate data
@@ -63,18 +63,23 @@ dosim <- function(sim.settings){
         muorig = Aginv %*%  cbind(c(w, murest))
 
 
-        ngen = 1000
+        ngen = 10000
         ys = (MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
 
         ## Rejection sample
         in.polyhedron <- apply(ys, 1, function(myrow){
-            myrow = ys[1,]
             all(orig$mypoly$gamma %*% myrow > orig$mypoly$u)
-            return(all(orig$mypoly$gamma %*% myrow >= orig$mypoly$u))
+           return(all(orig$mypoly$gamma %*% myrow >= orig$mypoly$u))
         })
 
+        for(irow in 1:nrow(ys)){
+            myrow = ys[irow,]
+            all(orig$mypoly$gamma %*% myrow > orig$mypoly$u)
+        }
+
         ## Compute the quantile of the vTY|AY
-        ys = ys[which(in.polyhedron),]
+        ys= ys[which(in.polyhedron),]
+
         vtvec = apply(ys, 1, function(my.y){
             nu = getstuff(my.y, type=type, teststep=teststep)
             my.v <- make_all_segment_contrasts(nu$g2)[[toString(nu$cp2*nu$cp2.sign)]] ## segment contrast
@@ -87,21 +92,10 @@ dosim <- function(sim.settings){
 
         ## pv = sum(vtvec > observed.vt | vtvec < -observed.vt)/length(vtvec)
         pv = sum(vtvec > observed.vt)/length(vtvec)
+
         return(pv)
-    }, mc.cores=3)
-    ## })
-    print("done")
+    }, mc.cores=2)
+    ## }
     return(unlist(pvs))
 }
 
-## Things to run
-pvs.1step.binseg = dosim(list(mn=rep(0,10), sigma=1, nsim=500, type="binseg", teststep = 1))
-pvs.1step.fusedlasso = dosim(list(mn = rep(0,4), sigma=1, nsim=1000, type="fusedlasso", teststep = 1))
-pvs.0step.binseg = dosim(list(mn=rep(0,n), sigma=1, nsim=500, type="binseg", teststep = 0))
-pvs.0step.fusedlasso = dosim(list( mn=rep(0,n), sigma=1, nsim=500, type="fusedlasso", teststep = 0))
-
-sim.settings.list = list(list(mn=rep(0,10), sigma=1, nsim=500, type="binseg", teststep = 1),
-                         list(mn = rep(0,10), sigma=1, nsim=500, type="fusedlasso", teststep = 1),
-                         list(mn=rep(0,10), sigma=1, nsim=500, type="binseg", teststep = 0),
-                         list( mn=rep(0,10), sigma=1, nsim=500, type="fusedlasso", teststep = 0))
-pvslist = mclapply(sim.settings.list,function(mysetting)dosim(mysetting), mc.cores=3)
