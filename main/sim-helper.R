@@ -48,7 +48,7 @@ getstuff <- function(y, type, teststep){
 
 
 ## Helper function
-get.ith.model <- function(y, type, teststep){
+get.two.models <- function(y, type, teststep){
 
     n = length(y)
 
@@ -84,50 +84,50 @@ get.ith.model <- function(y, type, teststep){
 }
 
 
-        get.cond.gauss.param = function(orig){
+##' Get conditional Gaussian parameters, given current model object.
+get.cond.gauss.param = function(obj.curr, y0, mn = rep(0,length(y0))){
 
-            ## Form the sufficient statistic linear operator
-            plateaus = get_plateaus(orig$cp.curr, n)
-            suff.rows = do.call(rbind,lapply(plateaus, function(plt){
-                                      v= rep(0,n); v[plt] = 1/length(plt); return(v)}))
-            A = suff.rows
+    ## Form the sufficient statistic linear operator
+    plateaus = get_plateaus(obj.curr$cp.curr, n)
+    suff.rows = do.call(rbind,lapply(plateaus, function(plt){
+                              v= rep(0,n); v[plt] = 1/length(plt); return(v)}))
+    A = suff.rows
 
-            ## Get null span
-            w = A %*% y0
-            S = svd(t(A),nu=ncol(A))
-            nr = nrow(A)
-            A_rest = t(S$u[,(nr+1):ncol(A)])
+    ## Get null span
+    w = A %*% y0
+    S = svd(t(A),nu=ncol(A))
+    nr = nrow(A)
+    A_rest = t(S$u[,(nr+1):ncol(A)])
 
-            Ag = rbind(A,A_rest)
+    Ag = rbind(A,A_rest)
 
-            ## Partition matrix into four blocks
-            Sigma = (Ag) %*% covariance %*% t(Ag)
-            Si = nrow(A)
-            S11 = Sigma[1:Si, 1:Si, drop=FALSE]
-            S12 = Sigma[1:Si, (Si+1):n, drop=FALSE]
-            S21 = Sigma[(Si+1):n, 1:Si, drop=FALSE]
-            S22 = Sigma[(Si+1):n, (Si+1):n, drop=FALSE]
+    ## Partition matrix into four blocks
+    Sigma = (Ag) %*% covariance %*% t(Ag)
+    Si = nrow(A)
+    S11 = Sigma[1:Si, 1:Si, drop=FALSE]
+    S12 = Sigma[1:Si, (Si+1):n, drop=FALSE]
+    S21 = Sigma[(Si+1):n, 1:Si, drop=FALSE]
+    S22 = Sigma[(Si+1):n, (Si+1):n, drop=FALSE]
 
-            ## Calculate distr of (A_rest y| Ay) using Schur's complement
-            Sigmarest = S22 - S21%*%solve(S11, S12)
-            murest = A_rest%*%mn + S21 %*% solve(S11, cbind(w - A %*% mn))
+    ## Calculate distr of (A_rest y| Ay) using Schur's complement
+    Sigmarest = S22 - S21%*%solve(S11, S12)
+    murest = A_rest%*%mn + S21 %*% solve(S11, cbind(w - A %*% mn))
 
-            ## Linear this back to to the original y scale, via left multiplication by Ag
-            Aginv = solve(Ag)
-            Sigmanew = matrix(0, nrow=n, ncol=n)
-            Sigmanew[(Si+1):n, (Si+1):n] = Sigmarest
-            Sigmaorig = Aginv %*% Sigmanew %*% t(Aginv)
-            muorig = Aginv %*%  cbind(c(w, murest))
-            return(list(muorig=muorig, Sigmaorig=Sigmaorig))
-        }
-
-
-forwardstop_backwards <- function(pvseq, alpha){
+    ## Linear this back to to the original y scale, via left multiplication by Ag
+    Aginv = solve(Ag)
+    Sigmanew = matrix(0, nrow=n, ncol=n)
+    Sigmanew[(Si+1):n, (Si+1):n] = Sigmarest
+    Sigmaorig = Aginv %*% Sigmanew %*% t(Aginv)
+    muorig = Aginv %*%  cbind(c(w, murest))
+    return(list(muorig=muorig, Sigmaorig=Sigmaorig))
+}
 
 
-    alpha = 0.1
+
+## Apply forwardstop.
+myforwardstop <- function(pvseq, alpha){
     fdp = sapply(1:length(pvseq), function(k){
         ((-1/k) * sum(log(1-pvseq)[1:k]))
     })
-    which.max(fdp<=alpha)
+    return(which.max(fdp<=alpha))
 }

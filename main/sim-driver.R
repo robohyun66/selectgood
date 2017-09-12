@@ -111,7 +111,7 @@ dosim2 <- function(sim.settings){
     ## Extracting things
     sigma = sim.settings$sigma
     mn = sim.settings$mn
-    n=length(mn)
+    n = length(mn)
     nsim = sim.settings$nsim
     type = sim.settings$type
     teststep = sim.settings$teststep
@@ -119,41 +119,99 @@ dosim2 <- function(sim.settings){
     lev=sim.settings$lev
 
     ## Collect results
-    nsim=10
-    all.results = list(nsim)
-    ## for(isim in 1:nsim){
-    all.results = lapply(1:nsim, function(isim){
+    all.results = mclapply(1:nsim, function(isim){
+
         printprogress(isim,nsim)
 
         ## Generate data
         y0 <- mn + rnorm(n,0,sigma)
 
-        maxsteps = 1
-        pvseq = rep(NA,maxsteps)
+        maxsteps = 2
+        pvseq = rep(NA,maxsteps+1)
+        names(pvseq) = sapply(0:maxsteps,toString)
         changepoint.set.seq = list()
-        for(istep in 1:maxsteps){
 
+        get.all.models(y0, type=type, maxsteps)
+        get.all.models <- function(y, type, maxsteps){
+
+            n = length(y)
+
+            maxsteps = 5
+            obj.final = binSeg_fixedSteps(y0, numSteps=maxsteps) ## Change to y
+            poly.list = list()
+            model.list = list()
+            if(type=="binseg"){
+                for(istep in 0:maxsteps){
+                    if(istep==0){
+                        poly.list[[istep+1]] = polyhedra(obj=rbind(rep(0,n)),u=0)
+                        cp.list[[istep+1]] = cp.sign.list[[istep+1]] = NA
+                    }
+                    poly.list[[istep+1]] = polyhedra(obj.final, numsteps=istep)
+                    cp.list[[istep+1]] = obj.final$cp[1:istep]
+                    cp.sign.list[[istep+1]] = obj.final$cp.sign[1:istep]
+                }
+            }
+
+            obj.final$cp
+            things
+
+            ## it would be great if I could collect smaller submodels from binSeg_fixedSteps.
+
+
+             ## Fit binseg model, collect pvals BSFS.
+             if(type=="binseg"){
+
+                 if(teststep==0){
+                     obj.curr=NULL
+                     poly.curr = polyhedra(obj=rbind(rep(0,n)),
+                                           u=0)
+                     cp.curr = cp.curr.sign = c()
+                 } else {
+                     obj.curr = binSeg_fixedSteps(y, numSteps=teststep)
+                     poly.curr = polyhedra(obj.curr)
+                     cp.curr = obj.curr$cp
+                     cp.curr.sign = obj.curr$cp.sign
+                 }
+                 obj.next = binSeg_fixedSteps(y, numSteps=teststep+1)
+             } else {
+                 stop("type not written yet!")
+             }
+
+             cp.next = obj.next$cp[which(!(obj.next$cp%in%cp.curr))]
+             cp.next.sign = obj.next$cp.sign[which(!(obj.next$cp%in%cp.curr))]
+
+             return(list(obj.curr=obj.curr,
+                         obj.next=obj.next,
+                         cp.curr=cp.curr,
+                         cp.next=cp.next,
+                         cp.curr.sign=cp.curr.sign,
+                         cp.next.sign=cp.next.sign,
+                       poly.curr=poly.curr))
+        }
+
+        ngens = c(1000,10000,500000)
+        for(istep in 0:maxsteps){
+
+            ## tryCatch({
             ## Collect i'th model
             source("../main/sim-helper.R")
-            modelinfo <- get.ith.model(y0, type=type, istep)
-            myparam <- get.cond.gauss.param(modelinfo)
+            modelinfo <- get.two.models(y0, type=type, istep)
+            myparam <- get.cond.gauss.param(modelinfo$obj.curr, y0)
             muorig <- myparam$muorig
             Sigmaorig <- myparam$Sigmaorig
 
-            ## ngen = 1000*istep^3 ## ngen should grow for further steps.
-            ngen = 100*istep^3 ## ngen should grow for further steps.
+            ## Generate new ys, then rejection sample
+            ngen = ngens[istep+1]
             ys = (MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
-
-            ## Rejection sample
             in.polyhedron <- apply(ys, 1, function(myrow){
-                return(all(modelinfo$poly.curr$gamma %*% myrow > modelinfo$poly.curr$u))
+                return(all(modelinfo$poly.curr$gamma %*% myrow >= modelinfo$poly.curr$u))
             })
             ys= ys[which(in.polyhedron),]
 
-
             ## Compute the quantile of the vTY|AY
             vtvec = apply(ys, 1, function(my.y){
-                new.modelinfo = get.ith.model(my.y, type, teststep)
+                new.modelinfo = get.ith.model(my.y, type, istep)
+                modelinfo <- get.two.models(my.y, type, istep)
                 all.vs = make_all_segment_contrasts(new.modelinfo$obj.next)
                 my.v <- all.vs[[toString(new.modelinfo$cp.next*new.modelinfo$cp.next.sign)]]
                 return(sum(my.y*my.v))
@@ -165,35 +223,41 @@ dosim2 <- function(sim.settings){
             observed.vt = as.numeric(v%*%y0)
 
             ## pv = sum(vtvec > observed.vt | vtvec < -observed.vt)/length(vtvec)
-            pvseq[istep] = sum(vtvec > observed.vt)/length(vtvec)
-            changepoint.set.seq[[istep]] = modelinfo$cp.curr
+            pv = sum(vtvec > observed.vt)/length(vtvec)
+            pvseq[toString(istep)] = pv
+            changepoint.set.seq[[toString(istep)]] = modelinfo$cp.curr
+            ## }, error = function(err) {
+            ##     err$message = paste(err$message,"\n(rejection sampling rejected all samples..!)",sep="")
+            ##     warning(err)})
         }
 
-        ## Compare observed verdicts to truth
+        ## ## Compare observed verdicts to truth
         true.cp = n/2
         true.verdicts= sapply(changepoint.set.seq, function(mycpset){all(true.cp %in% mycpset)})
         true.stop.time = which.min(true.verdicts)
 
-        ## See verdicts
+        ## ## See verdicts
         verdicts = (pvseq<0.05)
         pvseq = pvseq[which(!is.na(pvseq))]
-        ## selectiveInference::forwardStop(pvseq, alpha=0.1)
+        stop.time = selectiveInference::forwardStop(pvseq, alpha=fdrtarget)
 
-        ## Applyforwardstop
-        alpha = 0.1
-        fdp = sapply(1:length(pvseq), function(k){
-            ((-1/k) * sum(log(1-pvseq)[1:k]))
-        })
-        which.max(fdp<=alpha)
-        false.discovery.proportion = (stop.time-1)/stop.time
 
-        return(list(stop.time=stop.time,
+        ## False discovery proportion
+        fdp = (stop.time-true.stop.time)/true.stop.time
+
+        return(list(stop.time=stop.time, true.stop.time = true.stop.time, fdp = fdp,
                     changepoint.set.seq=changepoint.set.seq,
                     pvseq=pvseq))
-    })
+    },mc.cores=4)
 
-    qqunif(sapply(all.results,function(myresult)myresult[["pvseq"]]))
+
+
 
     ## Analyze results
+    ## (sapply(all.results,function(myresult)myresult[["pvseq"]]))
+    ## (sapply(all.results,function(myresult)myresult[["fdp"]]))
+
+    return()
+
 
 }
