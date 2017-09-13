@@ -1,1 +1,15 @@
+*.Rproj.user
+*.Rhistory
+*.Ruserdata
+.Rout
+*.Rout
+*.out
+.Rproj.user
+.Rd
+*.Rd
+*.RData
+*.Rdata
+\#*\#
+.\#*
 main/slides/*
+build-and-install.R
