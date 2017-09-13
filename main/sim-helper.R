@@ -84,11 +84,18 @@ get.two.models <- function(y, type, teststep){
 }
 
 
-##' Get conditional Gaussian parameters, given current model object.
-get.cond.gauss.param = function(obj.curr, y0, mn = rep(0,length(y0))){
+##' Get conditional Gaussian parameters, conditioning on the sample means of the
+##' conditioned-upon (i.e. most current) model changepoint set.
+##' @param cp.curr Current changepoints.
+##' @param y0 Observed data vector on hand.
+##' @param mn Mean vector, of the observed data vector.
+get.cond.gauss.param = function(cp.curr, y0, mn = rep(0,length(y0)), covariance){
+
+
+    n=length(y0)
 
     ## Form the sufficient statistic linear operator
-    plateaus = get_plateaus(obj.curr$cp.curr, n)
+    plateaus = get_plateaus(cp.curr, n)
     suff.rows = do.call(rbind,lapply(plateaus, function(plt){
                               v= rep(0,n); v[plt] = 1/length(plt); return(v)}))
     A = suff.rows
@@ -130,4 +137,46 @@ myforwardstop <- function(pvseq, alpha){
         ((-1/k) * sum(log(1-pvseq)[1:k]))
     })
     return(which.max(fdp<=alpha))
+}
+
+
+
+##' Given |y| and algorithm |type|, get sequence of changepoints, changepoint
+##' signs, and polyhedra for all intermediate models
+##' @param y Data vector
+##' @param type Type of algorithms; currently only handles "binseg".
+##' @param maxsteps Maximum number of steps to take
+##' @param only.last TRUE if you only want the /last/ model's information,
+##'     instead of the entire sequence of model information.
+get.all.models <- function(y, type=c("binseg", "fusedlasso"), maxsteps, only.last=FALSE){
+
+    n = length(y)
+    obj.final = binSeg_fixedSteps(y, numSteps=maxsteps)
+    poly.list = cp.list = cp.sign.list = list()
+
+    ## Decide whether to calculate all steps, or only last step
+    if(only.last){
+        allsteps = maxsteps
+    } else {
+        allsteps = 0:maxsteps
+    }
+
+    ## Collect smaller submodels from binSeg_fixedSteps.
+    if(type=="binseg"){
+        for(istep in allsteps){
+            if(istep==0){
+                poly.list[[istep+1]] = polyhedra(obj=rbind(rep(0,n)),u=0)
+                cp.list[[istep+1]] = cp.sign.list[[istep+1]] = c()
+            } else {
+                poly.list[[istep+1]] = polyhedra(obj.final, numSteps=istep)
+                cp.list[[istep+1]] = obj.final$cp[1:istep]
+                cp.sign.list[[istep+1]] = obj.final$cp.sign[1:istep]
+            }
+        }
+    }
+
+    return(list(obj.final=obj.final,
+                poly.list=poly.list,
+                cp.list=cp.list,
+                cp.sign.list=cp.sign.list))
 }

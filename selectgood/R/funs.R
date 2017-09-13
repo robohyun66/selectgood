@@ -1,5 +1,14 @@
-## Helper function.
+##' Helper function. Obtains list of indices of plateaus in (1:n), broken at
+##' |inds|.
+##' @param inds integer vector of changepoint locations.
+##' @param n length of data of interest.
 get_plateaus <- function(inds,n){
+    ## Basic checks
+    if(length(inds)!=0){
+        if(any(is.na(inds))){
+            stop("|inds| argument should not contain any NA's! It should be NULL, or equivalently |c()|, if empty.")
+        }
+    }
     ilist = Map(function(a,b)(a+1):b,
                 c(0,inds), c(inds,n))
     return(ilist)
