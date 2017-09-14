@@ -16,6 +16,7 @@ dosim2 <- function(sim.settings){
     covariance <- diag(rep(sigma,n))
     mc.cores = sim.settings$mc.cores
     maxsteps = sim.settings$maxsteps
+    ngen = sim.settings$ngen
 
     ## Collect results
     all.results = lapply(1:nsim, function(isim){
@@ -30,7 +31,6 @@ dosim2 <- function(sim.settings){
 
         models = get.all.models(y0, type=type, maxsteps+1)
 
-        ngens = c(500, 500, 500000)
         for(istep in 0:maxsteps){
 
             ## Collect i'th model
@@ -46,23 +46,29 @@ dosim2 <- function(sim.settings){
             muorig <- myparam$muorig
             Sigmaorig <- myparam$Sigmaorig
 
-
             ## Generate new ys, then rejection sample
-            ngen = ngens[istep+1]
-            ys = (MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
-            in.polyhedron <- apply(ys, 1, function(myrow){
-                return(all(poly.curr$gamma %*% myrow >= poly.curr$u))
-            })
-            accepted = which(in.polyhedron)
-            if(length(accepted) > 1000){
-                accepted = accepted[1:1000]
+            enough.samples = FALSE
+            accepted=c()
+            ys.all = rbind(rep(1,n))[-1,]
+            while(!enough.samples){
+                ys = (MASS::mvrnorm(n=ngen,mu=muorig,Sigma=Sigmaorig))
+                in.polyhedron <- apply(ys, 1, function(myrow){
+                    return(all(poly.curr$gamma %*% myrow >= poly.curr$u))
+                })
+                accepted = which(in.polyhedron)
+                ys.all = rbind(ys.all,ys[accepted,])
+                enough.samples = (nrow(ys.all)>100)
+                if(istep==2 & !enough.samples) print(nrow(ys.all))
             }
-            ys = ys[accepted,]
+
+            ## Only use at most 1000 samples, to save computation at the next chunk.
+            if(nrow(ys.all) > 500){
+                ys.all = ys.all[sample(1:nrow(ys.all), 500),]
+            }
 
             ## Compute the quantile of the vTY|AY
-            ## vtvec = apply(ys, 1, function(my.y){
-            vtvec = mclapply(1:nrow(ys), function(irow){
-                my.y = ys[irow,]
+            vtvec = mclapply(1:nrow(ys.all), function(irow){
+                my.y = ys.all[irow,]
                 newmodels = get.all.models(my.y, type=type, maxsteps=istep+1, TRUE)
                 new.cp <- newmodels$cp.list[[istep+2]]
                 new.cp.sign <- newmodels$cp.sign.list[[istep+2]]
@@ -70,6 +76,7 @@ dosim2 <- function(sim.settings){
                 my.v <- all.vs[[toString(tail(new.cp,1)*tail(new.cp.sign,1))]]
                 return(sum(my.y*my.v))
             },mc.cores=mc.cores)
+
 
             ## Compute original v^TY
             all.vs = make_all_segment_contrasts_from_cp(cp.next,cp.sign.next,n)
