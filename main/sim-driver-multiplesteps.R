@@ -54,9 +54,7 @@ dosim2 <- function(sim.settings){
                 return(all(poly.curr$gamma %*% myrow >= poly.curr$u))
             })
             accepted = which(in.polyhedron)
-            print(length(accepted))
             if(length(accepted) > 1000){
-                print("truncation happened!")
                 accepted = accepted[1:1000]
             }
             ys = ys[accepted,]
